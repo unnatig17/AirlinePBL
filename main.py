@@ -1,81 +1,153 @@
-from colorama import Fore, Style, init
+import streamlit as st
+import sqlite3
 
-init(autoreset=True)
-
+# Core logic
 class AirlineSeating:
-    def __init__(self, rows=10, cols=9, aisle_columns=[3, 7], aisle_width=2):
-        self.seats = {}
+    def __init__(self, rows=10, seat_labels="ABCDEF"):
         self.rows = rows
-        self.cols = cols
-        self.aisle_columns = aisle_columns
-        self.aisle_width = aisle_width
+        self.seat_labels = seat_labels
+        self.db_connection = sqlite3.connect("seats.db")  # Move this here to ensure db_connection is set
+        self.create_table()  # Now the table is created
+        self.seats = {}
         self.create_seats()
 
+    def create_table(self):
+        cursor = self.db_connection.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS seats
+                        (seat TEXT PRIMARY KEY, status TEXT)''')
+        self.db_connection.commit()
+
     def create_seats(self):
-        seat_letters = "ABCDEFGHIJ"
+        cursor = self.db_connection.cursor()
         for row in range(1, self.rows + 1):
-            for letter in seat_letters[:self.cols]:
-                self.seats[f"{letter}{row}"] = "Available"
+            for letter in self.seat_labels:
+                seat = f"{row}{letter}"
+                cursor.execute("INSERT OR IGNORE INTO seats (seat, status) VALUES (?, ?)", (seat, "Available"))
+        self.db_connection.commit()
+
+    def get_seat_status(self, seat):
+        cursor = self.db_connection.cursor()
+        cursor.execute("SELECT status FROM seats WHERE seat = ?", (seat,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def update_seat_status(self, seat, status):
+        cursor = self.db_connection.cursor()
+        cursor.execute("UPDATE seats SET status = ? WHERE seat = ?", (status, seat))
+        self.db_connection.commit()
 
     def book_seat(self, seat):
-        if seat in self.seats:
-            if self.seats[seat] == "Available":
-                self.seats[seat] = "Booked"
-                print(Fore.GREEN + f"Seat {seat} booked successfully!" + Style.RESET_ALL)
-            else:
-                print(Fore.RED + f" Seat {seat} is already booked!" + Style.RESET_ALL)
+        status = self.get_seat_status(seat)
+        if status == "Available":
+            self.update_seat_status(seat, "Booked")
+            return True, f"Seat {seat} booked successfully!"
+        elif status == "Booked":
+            return False, f"Seat {seat} is already booked!"
         else:
-            print(Fore.YELLOW + f"⚠ Invalid seat number: {seat}" + Style.RESET_ALL)
+            return False, f"Invalid seat number: {seat}"
 
     def cancel_seat(self, seat):
-        if seat in self.seats:
-            if self.seats[seat] == "Booked":
-                self.seats[seat] = "Available"
-                print(Fore.CYAN + f"Seat {seat} has been canceled and is now available." + Style.RESET_ALL)
-            else:
-                print(Fore.YELLOW + f"Seat {seat} is not booked!" + Style.RESET_ALL)
+        status = self.get_seat_status(seat)
+        if status == "Booked":
+            self.update_seat_status(seat, "Available")
+            return True, f"Seat {seat} canceled successfully."
+        elif status == "Available":
+            return False, f"Seat {seat} is not currently booked."
         else:
-            print(Fore.YELLOW + f"Invalid seat number: {seat}" + Style.RESET_ALL)
+            return False, f"Invalid seat number: {seat}"
 
-    def display_seating(self):
-        print("\nAirline Seating Arrangement:")
-        seat_letters = "ABCDEFGHIJ"
+    def auto_assign_best_seat(self):
+        for row in range(1, self.rows + 1):
+            for letter in self.seat_labels:
+                seat = f"{row}{letter}"
+                if self.get_seat_status(seat) == "Available":
+                    self.update_seat_status(seat, "Booked")
+                    return seat, f"Best available seat {seat} has been booked!"
+        return None, "No seats available."
 
+    def get_seating_display(self):
+        layout = []
         for row in range(1, self.rows + 1):
             row_display = []
-            for col, letter in enumerate(seat_letters[:self.cols], start=1):
-                seat = f"{letter}{row}"
-                if self.seats[seat] == "Available":
-                    row_display.append(Fore.GREEN + seat + Style.RESET_ALL)
-                else:
-                    row_display.append(Fore.RED + seat + Style.RESET_ALL)
-                
-                if col in self.aisle_columns:
-                    row_display.append(" " * (self.aisle_width * 4))
+            for idx, letter in enumerate(self.seat_labels):
+                seat = f"{row}{letter}"
+                status = self.get_seat_status(seat)
+                color = "#28a745" if status == "Available" else "#dc3545"
+                row_display.append((seat, color))
+                # Add aisle after seat C (index 2)
+                if idx == 2:
+                    row_display.append(("AISLE", None))
+            layout.append(row_display)
+            # Add horizontal aisle after row 5
+            if row == 5:
+                layout.append([("ROW GAP", None)])
+        return layout
 
-            print("  ".join(row_display))
-        print()
 
-airline = AirlineSeating(rows=10, cols=9, aisle_columns=[3, 7], aisle_width=2)
+# --- Streamlit UI ---
+st.set_page_config(page_title="Airline Seat Booking", layout="centered")
+st.title("✈️ Airline Seat Booking System")
 
-while True:
-    airline.display_seating()
+# Session State
+if 'airline' not in st.session_state:
+    st.session_state.airline = AirlineSeating()
 
-    print("\nOptions:")
-    print("1. Book a seat")
-    print("2. Cancel a seat")
-    print("3. Exit")
+airline = st.session_state.airline
 
-    choice = input("Enter your choice: ")
+# Booking/Cancellation
+st.subheader("Manage Your Seat")
+action = st.radio("Choose action:", ["Book a seat", "Cancel a seat"])
+seat_input = st.text_input("Enter seat number (e.g., 1A)").upper()
 
-    if choice == "1":
-        seat = input("Enter seat number to book (e.g., A1): ").upper()
-        airline.book_seat(seat)
-    elif choice == "2":
-        seat = input("Enter seat number to cancel (e.g., A1): ").upper()
-        airline.cancel_seat(seat)
-    elif choice == "3":
-        print("Exiting... Have a great flight! ✈️")
-        break
+if st.button("Submit"):
+    if seat_input:
+        if action == "Book a seat":
+            success, msg = airline.book_seat(seat_input)
+        else:
+            success, msg = airline.cancel_seat(seat_input)
+
+        if success:
+            st.success(msg)
+        else:
+            st.warning(msg)
     else:
-        print(Fore.YELLOW + "⚠ Invalid choice. Please enter 1, 2, or 3." + Style.RESET_ALL)
+        st.error("Please enter a valid seat number.")
+
+# Auto-Assign Best Available Seat
+if st.button("Auto-Assign Seat"):
+    seat, msg = airline.auto_assign_best_seat()
+    if seat:
+        st.success(msg)
+    else:
+        st.warning(msg)
+
+# Show updated seating
+st.subheader("Seating Layout")
+seating = airline.get_seating_display()
+
+for row in seating:
+    if row == [("ROW GAP", None)]:
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+        continue
+
+    cols = st.columns(len(row))
+    for i, (seat_label, color) in enumerate(row):
+        if seat_label == "AISLE":
+            cols[i].markdown("<div style='width: 20px;'></div>", unsafe_allow_html=True)
+        else:
+            cols[i].markdown(
+                f"""
+                <div style='
+                    background-color:{color};
+                    text-align:center;
+                    color:white;
+                    width: 80px;
+                    height: 50px;
+                    line-height: 50px;
+                    border-radius:10px;
+                    font-weight:bold;
+                    font-size:16px;
+                    margin: 4px auto;
+                '>{seat_label}</div>
+                """, unsafe_allow_html=True
+            )
