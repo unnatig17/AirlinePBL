@@ -2,67 +2,99 @@ import streamlit as st
 import sqlite3
 
 class AirlineSeating:
-    def __init__(self, rows=10, seat_labels="ABCDEF"):
+    def __init__(self, db_path="airline.db", rows=10, seat_labels="ABCDEF"):
+        self.db_path = db_path
         self.rows = rows
         self.seat_labels = seat_labels
-        self.db_connection = sqlite3.connect("seats.db")  
-        self.create_table()  
-        self.seats = {}
-        self.create_seats()
+        self.create_table()
+        self.create_seats_if_not_exists()
+
+    def connect_db(self):
+        return sqlite3.connect(self.db_path, check_same_thread=False)
 
     def create_table(self):
-        cursor = self.db_connection.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS seats
-                        (seat TEXT PRIMARY KEY, status TEXT)''')
-        self.db_connection.commit()
+        conn = self.connect_db()
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS seats (
+                          seat TEXT PRIMARY KEY,
+                          status TEXT)''')
+        conn.commit()
+        conn.close()
 
-    def create_seats(self):
-        cursor = self.db_connection.cursor()
+    def create_seats_if_not_exists(self):
+        conn = self.connect_db()
+        cursor = conn.cursor()
         for row in range(1, self.rows + 1):
             for letter in self.seat_labels:
                 seat = f"{row}{letter}"
                 cursor.execute("INSERT OR IGNORE INTO seats (seat, status) VALUES (?, ?)", (seat, "Available"))
-        self.db_connection.commit()
+        conn.commit()
+        conn.close()
 
     def get_seat_status(self, seat):
-        cursor = self.db_connection.cursor()
+        conn = self.connect_db()
+        cursor = conn.cursor()
         cursor.execute("SELECT status FROM seats WHERE seat = ?", (seat,))
         result = cursor.fetchone()
-        return result[0] if result else None
-
-    def update_seat_status(self, seat, status):
-        cursor = self.db_connection.cursor()
-        cursor.execute("UPDATE seats SET status = ? WHERE seat = ?", (status, seat))
-        self.db_connection.commit()
+        conn.close()
+        return result[0] if result else "Invalid"
 
     def book_seat(self, seat):
-        status = self.get_seat_status(seat)
-        if status == "Available":
-            self.update_seat_status(seat, "Booked")
+        if self.get_seat_status(seat) == "Available":
+            conn = self.connect_db()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE seats SET status = 'Booked' WHERE seat = ?", (seat,))
+            conn.commit()
+            conn.close()
             return True, f"Seat {seat} booked successfully!"
-        elif status == "Booked":
-            return False, f"Seat {seat} is already booked!"
-        else:
+        elif self.get_seat_status(seat) == "Invalid":
             return False, f"Invalid seat number: {seat}"
+        else:
+            return False, f"Seat {seat} is already booked!"
 
     def cancel_seat(self, seat):
-        status = self.get_seat_status(seat)
-        if status == "Booked":
-            self.update_seat_status(seat, "Available")
+        if self.get_seat_status(seat) == "Booked":
+            conn = self.connect_db()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE seats SET status = 'Available' WHERE seat = ?", (seat,))
+            conn.commit()
+            conn.close()
             return True, f"Seat {seat} canceled successfully."
-        elif status == "Available":
-            return False, f"Seat {seat} is not currently booked."
-        else:
+        elif self.get_seat_status(seat) == "Invalid":
             return False, f"Invalid seat number: {seat}"
+        else:
+            return False, f"Seat {seat} is not currently booked."
+
+    def get_seating_display(self):
+        conn = self.connect_db()
+        cursor = conn.cursor()
+        layout = []
+        for row in range(1, self.rows + 1):
+            row_display = []
+            for idx, letter in enumerate(self.seat_labels):
+                seat = f"{row}{letter}"
+                cursor.execute("SELECT status FROM seats WHERE seat = ?", (seat,))
+                result = cursor.fetchone()
+                status = result[0] if result else "Available"
+                color = "#28a745" if status == "Available" else "#dc3545"
+                row_display.append((seat, color))
+                if idx == 2:
+                    row_display.append(("AISLE", None))
+            layout.append(row_display)
+            if row == 5:
+                layout.append([("ROW GAP", None)])
+        conn.close()
+        return layout
 
     def auto_assign_best_seat(self):
         for row in range(1, self.rows + 1):
             for letter in self.seat_labels:
                 seat = f"{row}{letter}"
                 if self.get_seat_status(seat) == "Available":
-                    self.update_seat_status(seat, "Booked")
-                    return seat, f"Best available seat {seat} has been booked!"
-        return None, "No seats available."
+                    self.book_seat(seat)
+                    return seat, f"Auto-assigned seat {seat} successfully!"
+        return None, "No available seats!"
+
 
     def get_seating_display(self):
         layout = []
