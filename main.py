@@ -1,13 +1,12 @@
 import streamlit as st
 import sqlite3
 
-# Core logic
 class AirlineSeating:
     def __init__(self, rows=10, seat_labels="ABCDEF"):
         self.rows = rows
         self.seat_labels = seat_labels
-        self.db_connection = sqlite3.connect("seats.db")  # Move this here to ensure db_connection is set
-        self.create_table()  # Now the table is created
+        self.db_connection = sqlite3.connect("seats.db")  
+        self.create_table()  
         self.seats = {}
         self.create_seats()
 
@@ -74,27 +73,22 @@ class AirlineSeating:
                 status = self.get_seat_status(seat)
                 color = "#28a745" if status == "Available" else "#dc3545"
                 row_display.append((seat, color))
-                # Add aisle after seat C (index 2)
                 if idx == 2:
                     row_display.append(("AISLE", None))
             layout.append(row_display)
-            # Add horizontal aisle after row 5
             if row == 5:
                 layout.append([("ROW GAP", None)])
         return layout
 
 
-# --- Streamlit UI ---
 st.set_page_config(page_title="Airline Seat Booking", layout="centered")
 st.title("✈️ Airline Seat Booking System")
 
-# Session State
 if 'airline' not in st.session_state:
     st.session_state.airline = AirlineSeating()
 
 airline = st.session_state.airline
 
-# Booking/Cancellation
 st.subheader("Manage Your Seat")
 action = st.radio("Choose action:", ["Book a seat", "Cancel a seat"])
 seat_input = st.text_input("Enter seat number (e.g., 1A)").upper()
@@ -113,7 +107,6 @@ if st.button("Submit"):
     else:
         st.error("Please enter a valid seat number.")
 
-# Auto-Assign Best Available Seat
 if st.button("Auto-Assign Seat"):
     seat, msg = airline.auto_assign_best_seat()
     if seat:
@@ -121,7 +114,6 @@ if st.button("Auto-Assign Seat"):
     else:
         st.warning(msg)
 
-# Show updated seating
 st.subheader("Seating Layout")
 seating = airline.get_seating_display()
 
