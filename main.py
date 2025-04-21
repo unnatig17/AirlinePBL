@@ -82,7 +82,7 @@ class AirlineSeating:
 
 
 st.set_page_config(page_title="Airline Seat Booking", layout="centered")
-st.title("✈️ Airline Seat Booking System")
+st.title("✈️ SkySeats: Smart Airline Seat Allocation ")
 
 if 'airline' not in st.session_state:
     st.session_state.airline = AirlineSeating()
