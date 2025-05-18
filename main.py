@@ -123,6 +123,22 @@ class AirlineSeating:
                     return seat, f"Auto-assigned seat {seat} to {group_type or 'general'} group."
         return None, "No suitable seats available for this group."
 
+    def calculate_price(self, group_type=None):
+        base_price = 1500  # Base fare in INR
+        discount = 0
+
+        if group_type == "Elderly":
+            discount = 0.25  # 25% discount
+        elif group_type == "Disabled":
+            discount = 0.30  # 30% discount
+        elif group_type == "Infant":
+            discount = 0.50  # 50% discount
+        elif group_type == "Silent":
+            discount = 0  # no discount
+
+        price = base_price * (1 - discount)
+        return price
+
 st.set_page_config(page_title="Airline Seat Booking", layout="centered")
 st.title("\u2708\ufe0f SkySeats: Smart Airline Seat Allocation ")
 
@@ -132,12 +148,18 @@ if 'airline' not in st.session_state:
 airline = st.session_state.airline
 
 st.subheader("Manage Your Seat")
-action = st.radio("Choose action:", ["Book a seat", "Cancel a seat", "Auto-Assign with Preferences"])
+action = st.radio("Choose action:", [
+    "Book a seat",
+    "Cancel a seat",
+    "Auto-Assign with Preferences",
+    "Check seat price"
+])
+
 seat_input = st.text_input("Enter seat number (e.g., 1A)").upper()
 
 group_type = None
-if action == "Auto-Assign with Preferences":
-    group_type = st.selectbox("Select passenger type or preference:", ["None", "Elderly", "Disabled", "Infant", "Silent"])
+if action in ["Auto-Assign with Preferences", "Check seat price"]:
+    group_type = st.selectbox("Select passenger type:", ["None", "Elderly", "Disabled", "Infant", "Silent"])
     if group_type == "None":
         group_type = None
 
@@ -146,18 +168,39 @@ if st.button("Submit"):
         seat, msg = airline.auto_assign_best_seat(group_type)
         if seat:
             st.success(msg)
+            price = airline.calculate_price(group_type)
+            st.markdown(f"**Total fare: ₹{price:.2f}**")
         else:
             st.warning(msg)
+
+    elif action == "Check seat price":
+        if seat_input:
+            status = airline.get_seat_status(seat_input)
+            if status == "Invalid":
+                st.warning("Invalid seat number.")
+            elif status == "Booked":
+                st.warning(f"Seat {seat_input} is already booked.")
+            else:
+                price = airline.calculate_price(group_type)
+                st.success(f"Price for seat {seat_input} ({group_type or 'General'}): ₹{price:.2f}")
+        else:
+            st.error("Please enter a seat number to check price.")
+
     elif seat_input:
         if action == "Book a seat":
-            success, msg = airline.book_seat(seat_input)
-        else:
+            success, msg = airline.book_seat(seat_input, group_type)
+            if success:
+                st.success(msg)
+                price = airline.calculate_price(group_type)
+                st.markdown(f"**Total fare: ₹{price:.2f}**")
+            else:
+                st.warning(msg)
+        else:  # Cancel a seat
             success, msg = airline.cancel_seat(seat_input)
-
-        if success:
-            st.success(msg)
-        else:
-            st.warning(msg)
+            if success:
+                st.success(msg)
+            else:
+                st.warning(msg)
     else:
         st.error("Please enter a valid seat number.")
 
