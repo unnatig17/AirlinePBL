@@ -17,7 +17,8 @@ class AirlineSeating:
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS seats (
                           seat TEXT PRIMARY KEY,
-                          status TEXT)''')
+                          status TEXT,
+                          special_group TEXT DEFAULT NULL)''')
         conn.commit()
         conn.close()
 
@@ -39,11 +40,19 @@ class AirlineSeating:
         conn.close()
         return result[0] if result else "Invalid"
 
-    def book_seat(self, seat):
+    def get_seat_group(self, seat):
+        conn = self.connect_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT special_group FROM seats WHERE seat = ?", (seat,))
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result and result[0] else None
+
+    def book_seat(self, seat, group_type=None):
         if self.get_seat_status(seat) == "Available":
             conn = self.connect_db()
             cursor = conn.cursor()
-            cursor.execute("UPDATE seats SET status = 'Booked' WHERE seat = ?", (seat,))
+            cursor.execute("UPDATE seats SET status = 'Booked', special_group = ? WHERE seat = ?", (group_type, seat))
             conn.commit()
             conn.close()
             return True, f"Seat {seat} booked successfully!"
@@ -56,7 +65,7 @@ class AirlineSeating:
         if self.get_seat_status(seat) == "Booked":
             conn = self.connect_db()
             cursor = conn.cursor()
-            cursor.execute("UPDATE seats SET status = 'Available' WHERE seat = ?", (seat,))
+            cursor.execute("UPDATE seats SET status = 'Available', special_group = NULL WHERE seat = ?", (seat,))
             conn.commit()
             conn.close()
             return True, f"Seat {seat} canceled successfully."
@@ -66,55 +75,56 @@ class AirlineSeating:
             return False, f"Seat {seat} is not currently booked."
 
     def get_seating_display(self):
-        conn = self.connect_db()
-        cursor = conn.cursor()
-        layout = []
-        for row in range(1, self.rows + 1):
-            row_display = []
-            for idx, letter in enumerate(self.seat_labels):
-                seat = f"{row}{letter}"
-                cursor.execute("SELECT status FROM seats WHERE seat = ?", (seat,))
-                result = cursor.fetchone()
-                status = result[0] if result else "Available"
-                color = "#28a745" if status == "Available" else "#dc3545"
-                row_display.append((seat, color))
-                if idx == 2:
-                    row_display.append(("AISLE", None))
-            layout.append(row_display)
-            if row == 5:
-                layout.append([("ROW GAP", None)])
-        conn.close()
-        return layout
-
-    def auto_assign_best_seat(self):
-        for row in range(1, self.rows + 1):
-            for letter in self.seat_labels:
-                seat = f"{row}{letter}"
-                if self.get_seat_status(seat) == "Available":
-                    self.book_seat(seat)
-                    return seat, f"Auto-assigned seat {seat} successfully!"
-        return None, "No available seats!"
-
-
-    def get_seating_display(self):
         layout = []
         for row in range(1, self.rows + 1):
             row_display = []
             for idx, letter in enumerate(self.seat_labels):
                 seat = f"{row}{letter}"
                 status = self.get_seat_status(seat)
-                color = "#28a745" if status == "Available" else "#dc3545"
-                row_display.append((seat, color))
+                group = self.get_seat_group(seat)
+                if group == "Elderly":
+                    color = "#ffcc00"  # Yellow
+                elif group == "Disabled":
+                    color = "#6f42c1"  # Purple
+                elif group == "Infant":
+                    color = "#17a2b8"  # Teal
+                elif group == "Silent":
+                    color = "#343a40"  # Dark gray
+                else:
+                    color = "#28a745" if status == "Available" else "#dc3545"
+                row_display.append((seat, color, group))
                 if idx == 2:
-                    row_display.append(("AISLE", None))
+                    row_display.append(("AISLE", "#ffffff", None))
             layout.append(row_display)
             if row == 5:
-                layout.append([("ROW GAP", None)])
+                layout.append([("ROW GAP", "#ffffff", None)])
         return layout
 
+    def auto_assign_best_seat(self, group_type=None):
+        preferred_rows = range(1, self.rows + 1)
+
+        if group_type in ["Elderly", "Disabled"]:
+            preferred_rows = range(1, 4)  # front rows
+            aisle_seats = ["C", "D"]
+        elif group_type == "Infant":
+            preferred_rows = range(1, 4)
+            aisle_seats = self.seat_labels  # All seats
+        elif group_type == "Silent":
+            preferred_rows = range(self.rows - 2, self.rows + 1)
+            aisle_seats = self.seat_labels  # All seats
+        else:
+            aisle_seats = self.seat_labels
+
+        for row in preferred_rows:
+            for letter in aisle_seats:
+                seat = f"{row}{letter}"
+                if self.get_seat_status(seat) == "Available":
+                    self.book_seat(seat, group_type)
+                    return seat, f"Auto-assigned seat {seat} to {group_type or 'general'} group."
+        return None, "No suitable seats available for this group."
 
 st.set_page_config(page_title="Airline Seat Booking", layout="centered")
-st.title("✈️ SkySeats: Smart Airline Seat Allocation ")
+st.title("\u2708\ufe0f SkySeats: Smart Airline Seat Allocation ")
 
 if 'airline' not in st.session_state:
     st.session_state.airline = AirlineSeating()
@@ -122,11 +132,23 @@ if 'airline' not in st.session_state:
 airline = st.session_state.airline
 
 st.subheader("Manage Your Seat")
-action = st.radio("Choose action:", ["Book a seat", "Cancel a seat"])
+action = st.radio("Choose action:", ["Book a seat", "Cancel a seat", "Auto-Assign with Preferences"])
 seat_input = st.text_input("Enter seat number (e.g., 1A)").upper()
 
+group_type = None
+if action == "Auto-Assign with Preferences":
+    group_type = st.selectbox("Select passenger type or preference:", ["None", "Elderly", "Disabled", "Infant", "Silent"])
+    if group_type == "None":
+        group_type = None
+
 if st.button("Submit"):
-    if seat_input:
+    if action == "Auto-Assign with Preferences":
+        seat, msg = airline.auto_assign_best_seat(group_type)
+        if seat:
+            st.success(msg)
+        else:
+            st.warning(msg)
+    elif seat_input:
         if action == "Book a seat":
             success, msg = airline.book_seat(seat_input)
         else:
@@ -139,26 +161,22 @@ if st.button("Submit"):
     else:
         st.error("Please enter a valid seat number.")
 
-if st.button("Auto-Assign Seat"):
-    seat, msg = airline.auto_assign_best_seat()
-    if seat:
-        st.success(msg)
-    else:
-        st.warning(msg)
-
 st.subheader("Seating Layout")
 seating = airline.get_seating_display()
 
 for row in seating:
-    if row == [("ROW GAP", None)]:
+    if any(seat[0] == "ROW GAP" for seat in row):
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
         continue
 
     cols = st.columns(len(row))
-    for i, (seat_label, color) in enumerate(row):
+    for i, (seat_label, color, group) in enumerate(row):
         if seat_label == "AISLE":
             cols[i].markdown("<div style='width: 20px;'></div>", unsafe_allow_html=True)
         else:
+            label_display = f"{seat_label}"
+            if group:
+                label_display += f"<br><span style='font-size:10px;'>({group})</span>"
             cols[i].markdown(
                 f"""
                 <div style='
@@ -167,11 +185,12 @@ for row in seating:
                     color:white;
                     width: 80px;
                     height: 50px;
-                    line-height: 50px;
+                    line-height: 1.2em;
                     border-radius:10px;
                     font-weight:bold;
-                    font-size:16px;
+                    font-size:14px;
                     margin: 4px auto;
-                '>{seat_label}</div>
+                    padding-top: 5px;
+                '>{label_display}</div>
                 """, unsafe_allow_html=True
             )
