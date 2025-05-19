@@ -1,5 +1,6 @@
 import streamlit as st
 import sqlite3
+from collections import deque
 
 class AirlineSeating:
     def __init__(self, db_path="airline.db", rows=10, seat_labels="ABCDEF"):
@@ -124,20 +125,67 @@ class AirlineSeating:
         return None, "No suitable seats available for this group."
 
     def calculate_price(self, group_type=None):
-        base_price = 1500  # Base fare in INR
+        base_price = 5000  
         discount = 0
 
         if group_type == "Elderly":
-            discount = 0.25  # 25% discount
+            discount = 0.25 
         elif group_type == "Disabled":
-            discount = 0.30  # 30% discount
+            discount = 0.30  
         elif group_type == "Infant":
-            discount = 0.50  # 50% discount
+            discount = 0.50  
         elif group_type == "Silent":
-            discount = 0  # no discount
+            discount = 0  
 
         price = base_price * (1 - discount)
         return price
+
+    def find_adjacent_seats_bfs(self, start_seat, group_size):
+        start = self.seat_to_index(start_seat)
+        if not start:
+            return None
+
+        visited = set([start])
+        queue = deque([start])
+        seats_found = []
+
+        while queue and len(seats_found) < group_size:
+            current = queue.popleft()
+            seat_label = self.index_to_seat(*current)
+            if self.get_seat_status(seat_label) == "Available":
+                seats_found.append(current)
+            for neighbor in self.get_neighbors(*current):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+
+        if len(seats_found) == group_size:
+            return [self.index_to_seat(r, c) for r, c in seats_found]
+        else:
+            return None
+
+    def seat_to_index(self, seat):
+        try:
+            row = int(seat[:-1]) - 1
+            col = self.seat_labels.index(seat[-1])
+            return (row, col)
+        except (ValueError, IndexError):
+            return None
+
+    def index_to_seat(self, row, col):
+        if 0 <= row < self.rows and 0 <= col < len(self.seat_labels):
+            return f"{row+1}{self.seat_labels[col]}"
+        return None
+
+    def get_neighbors(self, row, col):
+        neighbors = []
+        directions = [(-1,0), (1,0), (0,-1), (0,1)]
+        for dr, dc in directions:
+            nr, nc = row + dr, col + dc
+            if 0 <= nr < self.rows and 0 <= nc < len(self.seat_labels):
+                neighbors.append((nr, nc))
+        return neighbors
+
 
 st.set_page_config(page_title="Airline Seat Booking", layout="centered")
 st.title("\u2708\ufe0f SkySeats: Smart Airline Seat Allocation ")
@@ -152,16 +200,20 @@ action = st.radio("Choose action:", [
     "Book a seat",
     "Cancel a seat",
     "Auto-Assign with Preferences",
-    "Check seat price"
+    "Check seat price",
+    "Find Adjacent Seats (BFS)"
 ])
 
 seat_input = st.text_input("Enter seat number (e.g., 1A)").upper()
-
 group_type = None
-if action in ["Auto-Assign with Preferences", "Check seat price"]:
+if action in ["Auto-Assign with Preferences", "Check seat price", "Find Adjacent Seats (BFS)"]:
     group_type = st.selectbox("Select passenger type:", ["None", "Elderly", "Disabled", "Infant", "Silent"])
     if group_type == "None":
         group_type = None
+
+group_size = None
+if action == "Find Adjacent Seats (BFS)":
+    group_size = st.number_input("Enter group size for adjacent seats:", min_value=1, max_value=6, value=2)
 
 if st.button("Submit"):
     if action == "Auto-Assign with Preferences":
@@ -185,6 +237,16 @@ if st.button("Submit"):
                 st.success(f"Price for seat {seat_input} ({group_type or 'General'}): ₹{price:.2f}")
         else:
             st.error("Please enter a seat number to check price.")
+
+    elif action == "Find Adjacent Seats (BFS)":
+        if seat_input and group_size:
+            seats = airline.find_adjacent_seats_bfs(seat_input, group_size)
+            if seats:
+                st.success(f"Found adjacent available seats: {', '.join(seats)}")
+            else:
+                st.warning("No adjacent available seats found for the group size.")
+        else:
+            st.error("Please enter a valid seat number and group size.")
 
     elif seat_input:
         if action == "Book a seat":
